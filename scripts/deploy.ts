@@ -30,7 +30,7 @@ async function main() {
 
   // 4. 재료 등록
   console.log("\n3. 재료 등록 중...");
-  
+
   const ingredients = [
     { id: 0, name: "Coffee Bean" },
     { id: 1, name: "Water" },
@@ -48,20 +48,18 @@ async function main() {
   // 5. 메뉴 가격 설정
   console.log("\n4. 메뉴 가격 설정 중...");
   const menuPrices = [
-    { id: 0, name: "ESPRESSO", price: ethers.parseEther("0.003") },
-    { id: 1, name: "HOT_AMERICANO", price: ethers.parseEther("0.004") },
-    { id: 2, name: "ICE_AMERICANO", price: ethers.parseEther("0.005") },
-    { id: 3, name: "HOT_LATTE", price: ethers.parseEther("0.006") },
-    { id: 4, name: "ICE_LATTE", price: ethers.parseEther("0.007") },
-    { id: 5, name: "HOT_CAPPU", price: ethers.parseEther("0.008") },
-    { id: 6, name: "ICE_CAPPU", price: ethers.parseEther("0.009") },
+    { id: 0, name: "ESPRESSO", price: 3 * 10 ** 6 }, // 3 USDC
+    { id: 1, name: "HOT_AMERICANO", price: 4 * 10 ** 6 }, // 4 USDC
+    { id: 2, name: "ICE_AMERICANO", price: 5 * 10 ** 6 }, // 5 USDC
+    { id: 3, name: "HOT_LATTE", price: 6 * 10 ** 6 }, // 6 USDC
+    { id: 4, name: "ICE_LATTE", price: 7 * 10 ** 6 }, // 7 USDC
+    { id: 5, name: "HOT_CAPPU", price: 8 * 10 ** 6 }, // 8 USDC
+    { id: 6, name: "ICE_CAPPU", price: 9 * 10 ** 6 }, // 9 USDC
   ];
 
   for (const menu of menuPrices) {
     await dripDropCafe.setMenuPrice(menu.id, menu.price);
-    console.log(
-      `${menu.name} (ID: ${menu.id}): ${ethers.formatEther(menu.price)} MPT`
-    );
+    console.log(`${menu.name} (ID: ${menu.id}): ${menu.price / 10 ** 6} USDC`);
   }
 
   // 6. 기본 레시피 설정
@@ -110,7 +108,7 @@ async function main() {
   for (const menu of menuPrices) {
     const price = await dripDropCafe.getMenuPrice(menu.id);
     console.log(
-      `${menu.name} (ID: ${menu.id}): ${ethers.formatEther(price)} MPT`
+      `${menu.name} (ID: ${menu.id}): ${Number(price) / 10 ** 6} USDC`
     );
   }
 }

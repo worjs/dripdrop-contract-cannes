@@ -114,10 +114,21 @@ contract DripDropCafe is Ownable, ReentrancyGuard {
     }
 
     /**
+     * @dev Burn coffee NFT (wrapper for CoffeeNFT.burn)
+     * @param tokenId Coffee NFT token ID
+     */
+    function burnCoffeeNFT(uint256 tokenId) external nonReentrant {
+        if (coffeeNFT.ownerOf(tokenId) != msg.sender) revert NotOwner();
+        
+        coffeeNFT.burn(tokenId);
+        emit Redeemed(msg.sender, tokenId);
+    }
+
+    /**
      * @dev Redeem coffee NFT
      * @param tokenId Coffee NFT token ID
      */
-    function redeem(uint256 tokenId) external nonReentrant {
+    function redeemCoffee(uint256 tokenId) external nonReentrant {
         if (coffeeNFT.ownerOf(tokenId) != msg.sender) revert NotOwner();
         
         coffeeNFT.burn(tokenId);
@@ -217,6 +228,105 @@ contract DripDropCafe is Ownable, ReentrancyGuard {
      */
     function getIngredientName(uint256 id) external view returns (string memory) {
         return ingredient.getIngredientName(id);
+    }
+
+    /**
+     * @dev Validate pattern against recipe (for FE pre-validation)
+     * @param menuId Menu ID to validate against
+     * @param pattern 3x3 pattern array
+     * @return isValid True if pattern matches recipe
+     */
+    function validatePattern(uint256 menuId, uint8[9] memory pattern) external view returns (bool) {
+        Recipe3x3 memory recipe = recipes[menuId];
+        if (recipe.hash == 0) return false;
+        
+        bytes32 patternHash = keccak256(abi.encodePacked(pattern));
+        return patternHash == recipe.hash;
+    }
+
+    /**
+     * @dev Check if pattern matches recipe and return menuId if valid, 0 if invalid
+     * @param pattern 3x3 pattern array
+     * @return menuId Menu ID if pattern matches any recipe, 0 if no match
+     */
+    function findMatchingRecipe(uint8[9] memory pattern) external view returns (uint256) {
+        bytes32 patternHash = keccak256(abi.encodePacked(pattern));
+        
+        // Check against known menu IDs (you might want to track these)
+        // For now, we'll check common menu IDs (1-10)
+        for (uint256 menuId = 1; menuId <= 10; menuId++) {
+            if (recipes[menuId].hash == patternHash) {
+                return menuId;
+            }
+        }
+        
+        return 0; // No matching recipe found
+    }
+
+    /**
+     * @dev Get all menu IDs that have recipes set
+     * @return Array of menu IDs with recipes
+     */
+    function getMenusWithRecipes() external view returns (uint256[] memory) {
+        uint256[] memory temp = new uint256[](10); // Assuming max 10 menus
+        uint256 count = 0;
+        
+        for (uint256 menuId = 1; menuId <= 10; menuId++) {
+            if (recipes[menuId].hash != 0) {
+                temp[count] = menuId;
+                count++;
+            }
+        }
+        
+        uint256[] memory result = new uint256[](count);
+        for (uint256 i = 0; i < count; i++) {
+            result[i] = temp[i];
+        }
+        
+        return result;
+    }
+
+    /**
+     * @dev Check if user has sufficient ingredients for a pattern
+     * @param user User address
+     * @param pattern 3x3 pattern array
+     * @return hasSufficient True if user has all required ingredients
+     */
+    function hasRequiredIngredients(address user, uint8[9] memory pattern) external view returns (bool) {
+        // Count required ingredients using arrays (max 10 different ingredient types)
+        uint256[10] memory ingredientIds;
+        uint256[10] memory requiredCounts;
+        uint256 uniqueCount = 0;
+        
+        // Count required ingredients
+        for (uint256 i = 0; i < 9; i++) {
+            if (pattern[i] != EMPTY) {
+                bool found = false;
+                // Check if ingredient already counted
+                for (uint256 j = 0; j < uniqueCount; j++) {
+                    if (ingredientIds[j] == pattern[i]) {
+                        requiredCounts[j]++;
+                        found = true;
+                        break;
+                    }
+                }
+                // If not found, add new ingredient
+                if (!found && uniqueCount < 10) {
+                    ingredientIds[uniqueCount] = pattern[i];
+                    requiredCounts[uniqueCount] = 1;
+                    uniqueCount++;
+                }
+            }
+        }
+        
+        // Check if user has sufficient balance for each ingredient
+        for (uint256 i = 0; i < uniqueCount; i++) {
+            if (ingredient.balanceOf(user, ingredientIds[i]) < requiredCounts[i]) {
+                return false;
+            }
+        }
+        
+        return true;
     }
 
     /**

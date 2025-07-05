@@ -365,7 +365,7 @@ describe("DripDropCafe", function () {
       const tokenId = 1;
       const nftBalanceBefore = await coffeeNFT.balanceOf(user.address);
 
-      await dripDropCafe.connect(user).redeem(tokenId);
+      await dripDropCafe.connect(user).redeemCoffee(tokenId);
 
       const nftBalanceAfter = await coffeeNFT.balanceOf(user.address);
       expect(nftBalanceBefore - nftBalanceAfter).to.equal(1);
@@ -373,7 +373,7 @@ describe("DripDropCafe", function () {
 
     it("Should emit Redeemed event", async function () {
       const tokenId = 1;
-      await expect(dripDropCafe.connect(user).redeem(tokenId))
+      await expect(dripDropCafe.connect(user).redeemCoffee(tokenId))
         .to.emit(dripDropCafe, "Redeemed")
         .withArgs(user.address, tokenId);
     });
@@ -381,14 +381,14 @@ describe("DripDropCafe", function () {
     it("Should revert with NotOwner if not token owner", async function () {
       const tokenId = 1;
       await expect(
-        dripDropCafe.connect(user2).redeem(tokenId)
+        dripDropCafe.connect(user2).redeemCoffee(tokenId)
       ).to.be.revertedWithCustomError(dripDropCafe, "NotOwner");
     });
 
     it("Should revert if token doesn't exist", async function () {
       const nonExistentTokenId = 999;
-      await expect(dripDropCafe.connect(user).redeem(nonExistentTokenId)).to.be
-        .reverted; // ERC721 nonexistent token error
+      await expect(dripDropCafe.connect(user).redeemCoffee(nonExistentTokenId))
+        .to.be.reverted; // ERC721 nonexistent token error
     });
   });
 
@@ -507,7 +507,7 @@ describe("DripDropCafe", function () {
       await dripDropCafe.connect(user).craftCoffee(ESPRESSO, espressoPattern);
 
       // Redeem coffee
-      await dripDropCafe.connect(user).redeem(1);
+      await dripDropCafe.connect(user).redeemCoffee(1);
 
       // Verify final states
       const nftBalance = await coffeeNFT.balanceOf(user.address);
@@ -518,5 +518,170 @@ describe("DripDropCafe", function () {
       );
       expect(cafeBalance).to.equal(PRICES[ESPRESSO]);
     });
+  });
+
+  it("Should allow redeeming coffee NFT", async function () {
+    // Set up menu and recipe first
+    const pattern = [1, 0, 0, 0, 0, 0, 0, 0, 0]; // WATER only
+    await dripDropCafe.setRecipe(1, pattern, "https://example.com/americano/");
+    await dripDropCafe.setMenuPrice(1, ethers.parseEther("0.05"));
+
+    // Order ingredients first
+    await mockPaymentToken
+      .connect(user)
+      .approve(dripDropCafe.target, ethers.parseEther("0.1"));
+    await dripDropCafe.connect(user).orderMenu(1);
+    await dripDropCafe.connect(user).orderMenu(1);
+
+    // Try to craft coffee
+    await expect(dripDropCafe.connect(user).craftCoffee(1, pattern)).to.emit(
+      dripDropCafe,
+      "Crafted"
+    );
+
+    // Get the minted NFT token ID
+    const coffeeBalance = await coffeeNFT.balanceOf(user.address);
+    expect(coffeeBalance).to.equal(1);
+
+    // Get token ID (should be 1 for first mint)
+    const tokenId = 1;
+
+    // Redeem the coffee NFT
+    await expect(dripDropCafe.connect(user).redeemCoffee(tokenId))
+      .to.emit(dripDropCafe, "Redeemed")
+      .withArgs(user.address, tokenId);
+
+    // Check NFT is burned
+    const balanceAfter = await coffeeNFT.balanceOf(user.address);
+    expect(balanceAfter).to.equal(0);
+  });
+
+  // New tests for pattern validation functions
+  describe("Pattern Validation Functions", function () {
+    beforeEach(async function () {
+      // Ingredients are already registered in main beforeEach, so skip registration
+
+      // Set up a recipe
+      const pattern = [1, 0, 0, 0, 0, 0, 0, 0, 0]; // WATER only
+      await dripDropCafe.setRecipe(
+        1,
+        pattern,
+        "https://example.com/americano/"
+      );
+      await dripDropCafe.setMenuPrice(1, ethers.parseEther("0.05"));
+    });
+
+    it("Should validate pattern correctly", async function () {
+      const correctPattern = [1, 0, 0, 0, 0, 0, 0, 0, 0]; // WATER only
+      const incorrectPattern = [2, 0, 0, 0, 0, 0, 0, 0, 0]; // MILK only
+
+      const isValidCorrect = await dripDropCafe.validatePattern(
+        1,
+        correctPattern
+      );
+      const isValidIncorrect = await dripDropCafe.validatePattern(
+        1,
+        incorrectPattern
+      );
+
+      expect(isValidCorrect).to.be.true;
+      expect(isValidIncorrect).to.be.false;
+    });
+
+    it("Should find matching recipe", async function () {
+      const pattern = [1, 0, 0, 0, 0, 0, 0, 0, 0]; // WATER only
+      const matchingMenuId = await dripDropCafe.findMatchingRecipe(pattern);
+
+      expect(matchingMenuId).to.equal(1);
+    });
+
+    it("Should return 0 for non-matching pattern", async function () {
+      const pattern = [2, 0, 0, 0, 0, 0, 0, 0, 0]; // MILK only (no recipe set)
+      const matchingMenuId = await dripDropCafe.findMatchingRecipe(pattern);
+
+      expect(matchingMenuId).to.equal(0);
+    });
+
+    it("Should get menus with recipes", async function () {
+      const menusWithRecipes = await dripDropCafe.getMenusWithRecipes();
+
+      expect(menusWithRecipes.length).to.equal(1);
+      expect(menusWithRecipes[0]).to.equal(1);
+    });
+
+    it("Should check if user has required ingredients", async function () {
+      const pattern = [1, 0, 0, 0, 0, 0, 0, 0, 0]; // WATER only
+
+      // User doesn't have ingredients yet
+      const hasIngredientsInitially = await dripDropCafe.hasRequiredIngredients(
+        user.address,
+        pattern
+      );
+      expect(hasIngredientsInitially).to.be.false;
+
+      // Give user some ingredients
+      await mockPaymentToken
+        .connect(user)
+        .approve(dripDropCafe.target, ethers.parseEther("0.1"));
+      await dripDropCafe.connect(user).orderMenu(1);
+
+      // Check again (user might have the required ingredient now)
+      const hasIngredientsAfter = await dripDropCafe.hasRequiredIngredients(
+        user.address,
+        pattern
+      );
+      // Note: This depends on random ingredient distribution, so we can't guarantee true
+      // But the function should execute without error
+      expect(typeof hasIngredientsAfter).to.equal("boolean");
+    });
+
+    it("Should handle complex patterns with multiple ingredients", async function () {
+      // Set up a more complex recipe
+      const complexPattern = [1, 2, 0, 3, 0, 0, 0, 0, 5]; // WATER, MILK, SUGAR, ICE
+      await dripDropCafe.setRecipe(
+        2,
+        complexPattern,
+        "https://example.com/latte/"
+      );
+
+      const isValid = await dripDropCafe.validatePattern(2, complexPattern);
+      expect(isValid).to.be.true;
+
+      const matchingMenuId = await dripDropCafe.findMatchingRecipe(
+        complexPattern
+      );
+      expect(matchingMenuId).to.equal(2);
+    });
+  });
+
+  it("Should withdraw payments", async function () {
+    // Set up menu and recipe first
+    const pattern = [1, 0, 0, 0, 0, 0, 0, 0, 0]; // WATER only
+    await dripDropCafe.setRecipe(1, pattern, "https://example.com/americano/");
+    await dripDropCafe.setMenuPrice(1, ethers.parseEther("0.05"));
+
+    // First, make some payments to the contract
+    await mockPaymentToken
+      .connect(user)
+      .approve(dripDropCafe.target, ethers.parseEther("0.1"));
+    await dripDropCafe.connect(user).orderMenu(1);
+
+    const contractBalance = await mockPaymentToken.balanceOf(
+      dripDropCafe.target
+    );
+    expect(contractBalance).to.equal(ethers.parseEther("0.05"));
+
+    const ownerBalanceBefore = await mockPaymentToken.balanceOf(owner.address);
+
+    // Withdraw payments
+    await dripDropCafe.withdrawPayments(
+      owner.address,
+      ethers.parseEther("0.05")
+    );
+
+    const ownerBalanceAfter = await mockPaymentToken.balanceOf(owner.address);
+    expect(ownerBalanceAfter).to.equal(
+      ownerBalanceBefore + ethers.parseEther("0.05")
+    );
   });
 });

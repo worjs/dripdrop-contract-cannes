@@ -162,7 +162,7 @@ async function main() {
   // 8. Redeem coffee NFT
   console.log("\n8. Redeeming coffee NFT...");
   await coffeeNFT.connect(user).approve(DRIP_DROP_CAFE_ADDRESS, tokenId);
-  await dripDropCafe.connect(user).redeem(tokenId);
+  await dripDropCafe.connect(user).redeemCoffee(tokenId);
   console.log("✅ Redeemed coffee NFT");
 
   // 9. Final balances

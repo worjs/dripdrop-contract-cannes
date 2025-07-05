@@ -159,23 +159,103 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title IngredientToken
- * @dev ERC1155 token for coffee ingredients (IDs 0-5)
+ * @dev ERC1155 token for coffee ingredients with dynamic ingredient management
  */
 contract IngredientToken is ERC1155, ERC1155Supply, Ownable {
-    // Ingredient IDs
-    uint256 public constant COFFEE_BEAN = 0;
-    uint256 public constant WATER = 1;
-    uint256 public constant MILK = 2;
-    uint256 public constant SUGAR = 3;
-    uint256 public constant CREAM = 4;
-    uint256 public constant ICE = 5;
+    // Dynamic ingredient management
+    mapping(uint256 => bool) public validIngredients;
+    mapping(uint256 => string) public ingredientNames;
+    uint256 public maxIngredientId;
+    
+    // Events
+    event IngredientRegistered(uint256 indexed id, string name);
+    event IngredientRemoved(uint256 indexed id);
+    
+    // Custom Errors
+    error InvalidIngredientID();
+    error IngredientAlreadyExists();
+    error IngredientNotExists();
 
     constructor() ERC1155("") Ownable(msg.sender) {}
 
     /**
+     * @dev Register a new ingredient type
+     * @param id Ingredient ID
+     * @param name Ingredient name
+     */
+    function registerIngredient(uint256 id, string memory name) external onlyOwner {
+        if (validIngredients[id]) revert IngredientAlreadyExists();
+        
+        validIngredients[id] = true;
+        ingredientNames[id] = name;
+        
+        if (id > maxIngredientId) {
+            maxIngredientId = id;
+        }
+        
+        emit IngredientRegistered(id, name);
+    }
+
+    /**
+     * @dev Remove an ingredient type (only if no supply exists)
+     * @param id Ingredient ID
+     */
+    function removeIngredient(uint256 id) external onlyOwner {
+        if (!validIngredients[id]) revert IngredientNotExists();
+        if (totalSupply(id) > 0) revert("Cannot remove ingredient with existing supply");
+        
+        validIngredients[id] = false;
+        delete ingredientNames[id];
+        
+        emit IngredientRemoved(id);
+    }
+
+    /**
+     * @dev Check if ingredient ID is valid
+     * @param id Ingredient ID
+     * @return True if valid
+     */
+    function isValidIngredient(uint256 id) external view returns (bool) {
+        return validIngredients[id];
+    }
+
+    /**
+     * @dev Get ingredient name
+     * @param id Ingredient ID
+     * @return Ingredient name
+     */
+    function getIngredientName(uint256 id) external view returns (string memory) {
+        if (!validIngredients[id]) revert IngredientNotExists();
+        return ingredientNames[id];
+    }
+
+    /**
+     * @dev Get all valid ingredient IDs
+     * @return Array of valid ingredient IDs
+     */
+    function getValidIngredients() external view returns (uint256[] memory) {
+        uint256[] memory temp = new uint256[](maxIngredientId + 1);
+        uint256 count = 0;
+        
+        for (uint256 i = 0; i <= maxIngredientId; i++) {
+            if (validIngredients[i]) {
+                temp[count] = i;
+                count++;
+            }
+        }
+        
+        uint256[] memory result = new uint256[](count);
+        for (uint256 i = 0; i < count; i++) {
+            result[i] = temp[i];
+        }
+        
+        return result;
+    }
+
+    /**
      * @dev Mint ingredients to address
      * @param to Address to mint to
-     * @param id Ingredient ID (0-5)
+     * @param id Ingredient ID
      * @param amount Amount to mint
      * @param data Additional data
      */
@@ -185,7 +265,7 @@ contract IngredientToken is ERC1155, ERC1155Supply, Ownable {
         uint256 amount,
         bytes memory data
     ) external onlyOwner {
-        require(id <= 5, "Invalid ingredient ID");
+        if (!validIngredients[id]) revert InvalidIngredientID();
         _mint(to, id, amount, data);
     }
 
@@ -203,7 +283,7 @@ contract IngredientToken is ERC1155, ERC1155Supply, Ownable {
         bytes memory data
     ) external onlyOwner {
         for (uint256 i = 0; i < ids.length; i++) {
-            require(ids[i] <= 5, "Invalid ingredient ID");
+            if (!validIngredients[ids[i]]) revert InvalidIngredientID();
         }
         _mintBatch(to, ids, amounts, data);
     }
@@ -219,7 +299,7 @@ contract IngredientToken is ERC1155, ERC1155Supply, Ownable {
         uint256 id,
         uint256 amount
     ) external onlyOwner {
-        require(id <= 5, "Invalid ingredient ID");
+        if (!validIngredients[id]) revert InvalidIngredientID();
         _burn(from, id, amount);
     }
 
@@ -342,7 +422,7 @@ contract CoffeeNFT is ERC721, ERC721URIStorage, Ownable {
     function tokenURI(uint256 tokenId) public view override(ERC721, ERC721URIStorage) returns (string memory) {
         return super.tokenURI(tokenId);
     }
-
+~
     function supportsInterface(bytes4 interfaceId) public view override(ERC721, ERC721URIStorage) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
@@ -435,15 +515,15 @@ contract DripDropCafe is Ownable, ReentrancyGuard {
     function orderMenu(uint256 menuId) external nonReentrant {
         uint256 price = menuPrices[menuId];
         if (price == 0) revert MenuPriceNotSet();
-        
-        // 1) ERC20 payment with try-catch
+
+        // Payment
         try payment.transferFrom(msg.sender, address(this), price) {
             // Success - continue
         } catch {
             revert PaymentFailed();
         }
 
-        // 2) Select random ingredient from recipe pool
+        // Get random ingredient and mint to user
         uint8 ingredientId = _randomIngredient(menuId);
         ingredient.mint(msg.sender, ingredientId, 1, "");
 
@@ -451,9 +531,58 @@ contract DripDropCafe is Ownable, ReentrancyGuard {
     }
 
     /**
+     * @dev Craft coffee using ingredients
+     * @param menuId Menu ID to craft
+     * @param pattern 3x3 pattern array
+     */
+    function craftCoffee(uint256 menuId, uint8[9] memory pattern) external nonReentrant {
+        Recipe3x3 memory recipe = recipes[menuId];
+        if (recipe.hash == 0) revert RecipeNotSet();
+
+        // Validate pattern matches recipe
+        bytes32 patternHash = keccak256(abi.encodePacked(pattern));
+        if (patternHash != recipe.hash) revert IncorrectGrid();
+
+        // Validate all non-empty ingredients are valid
+        for (uint256 i = 0; i < 9; i++) {
+            if (pattern[i] != EMPTY && !ingredient.isValidIngredient(pattern[i])) {
+                revert InvalidIngredientID();
+            }
+        }
+
+        // Burn ingredients from user
+        for (uint256 i = 0; i < 9; i++) {
+            if (pattern[i] != EMPTY) {
+                ingredient.burn(msg.sender, pattern[i], 1);
+            }
+        }
+
+        // Set base URI for the menu if not already set
+        if (bytes(baseURIs[menuId]).length > 0) {
+            coffeeNFT.setBaseURI(menuId, baseURIs[menuId]);
+        }
+        
+        // Mint coffee NFT
+        uint256 tokenId = coffeeNFT.mint(msg.sender, menuId);
+
+        emit Crafted(msg.sender, menuId, tokenId);
+    }
+
+    /**
+     * @dev Redeem coffee NFT
+     * @param tokenId Coffee NFT token ID
+     */
+    function redeem(uint256 tokenId) external nonReentrant {
+        if (coffeeNFT.ownerOf(tokenId) != msg.sender) revert NotOwner();
+        
+        coffeeNFT.burn(tokenId);
+        emit Redeemed(msg.sender, tokenId);
+    }
+
+    /**
      * @dev Set menu price (onlyOwner)
      * @param menuId Menu ID
-     * @param price Price in wei (18 decimals)
+     * @param price Price in payment tokens
      */
     function setMenuPrice(uint256 menuId, uint256 price) external onlyOwner {
         menuPrices[menuId] = price;
@@ -461,82 +590,45 @@ contract DripDropCafe is Ownable, ReentrancyGuard {
     }
 
     /**
+     * @dev Set recipe for menu (onlyOwner)
+     * @param menuId Menu ID
+     * @param pattern 3x3 pattern array
+     * @param uriPrefix URI prefix for NFT metadata
+     */
+    function setRecipe(uint256 menuId, uint8[9] memory pattern, string memory uriPrefix) external onlyOwner {
+        // Validate all non-empty ingredients are valid
+        for (uint256 i = 0; i < 9; i++) {
+            if (pattern[i] != EMPTY && !ingredient.isValidIngredient(pattern[i])) {
+                revert InvalidIngredientID();
+            }
+        }
+
+        bytes32 hash = keccak256(abi.encodePacked(pattern));
+        recipes[menuId] = Recipe3x3({
+            hash: hash,
+            pattern: pattern
+        });
+        baseURIs[menuId] = uriPrefix;
+        
+        emit RecipeSet(menuId);
+    }
+
+    /**
      * @dev Get menu price
      * @param menuId Menu ID
-     * @return Price in wei (18 decimals)
+     * @return Price in payment tokens
      */
     function getMenuPrice(uint256 menuId) external view returns (uint256) {
         return menuPrices[menuId];
     }
 
     /**
-     * @dev Craft coffee using ingredients
-     * @param menuId Menu ID to craft
-     * @param grid 3x3 grid of ingredients
-     */
-    function craftCoffee(uint256 menuId, uint8[9] calldata grid) external nonReentrant {
-        Recipe3x3 storage r = recipes[menuId];
-        if (r.hash == bytes32(0)) revert RecipeNotSet();
-
-        // 1) Exact pattern matching only
-        bytes32 h = keccak256(abi.encodePacked(grid));
-        if (h != r.hash) revert IncorrectGrid();
-
-        // 2) Count and burn ingredients
-        uint256[6] memory needs; // id 0-5
-        for (uint256 i = 0; i < 9; i++) {
-            uint8 id = grid[i];
-            if (id == EMPTY) continue;
-            if (id > 5) revert InvalidIngredientID();
-            needs[id] += 1;
-        }
-        
-        // Burn each ingredient individually
-        for (uint256 id = 0; id <= 5; id++) {
-            if (needs[id] > 0) {
-                ingredient.burn(msg.sender, id, needs[id]);
-            }
-        }
-
-        // 3) Mint NFT
-        uint256 tokenId = coffeeNFT.mint(msg.sender, menuId);
-        emit Crafted(msg.sender, menuId, tokenId);
-    }
-
-    /**
-     * @dev Redeem coffee NFT
-     * @param tokenId Token ID to redeem
-     */
-    
-    function redeem(uint256 tokenId) external {
-        if (coffeeNFT.ownerOf(tokenId) != msg.sender) revert NotOwner();
-        coffeeNFT.burn(tokenId);
-        emit Redeemed(msg.sender, tokenId);
-    }
-
-    /**
-     * @dev Set recipe for menu (onlyOwner)
+     * @dev Get recipe hash for menu
      * @param menuId Menu ID
-     * @param pattern 3x3 pattern array
-     * @param uriPrefix Token URI prefix
+     * @return Recipe hash
      */
-    function setRecipe(
-        uint256 menuId,
-        uint8[9] calldata pattern,
-        string calldata uriPrefix
-    ) external onlyOwner {
-        bytes32 h = keccak256(abi.encodePacked(pattern));
-        recipes[menuId] = Recipe3x3({
-            hash: h,
-            pattern: pattern
-        });
-        
-        if (bytes(uriPrefix).length > 0) {
-            baseURIs[menuId] = uriPrefix;
-            coffeeNFT.setBaseURI(menuId, uriPrefix);
-        }
-        
-        emit RecipeSet(menuId);
+    function getRecipeHash(uint256 menuId) external view returns (bytes32) {
+        return recipes[menuId].hash;
     }
 
     /**
@@ -546,6 +638,40 @@ contract DripDropCafe is Ownable, ReentrancyGuard {
      */
     function getRecipePattern(uint256 menuId) external view returns (uint8[9] memory) {
         return recipes[menuId].pattern;
+    }
+
+    /**
+     * @dev Register a new ingredient type (onlyOwner)
+     * @param id Ingredient ID
+     * @param name Ingredient name
+     */
+    function registerIngredient(uint256 id, string memory name) external onlyOwner {
+        ingredient.registerIngredient(id, name);
+    }
+
+    /**
+     * @dev Remove an ingredient type (onlyOwner)
+     * @param id Ingredient ID
+     */
+    function removeIngredient(uint256 id) external onlyOwner {
+        ingredient.removeIngredient(id);
+    }
+
+    /**
+     * @dev Get all valid ingredient IDs
+     * @return Array of valid ingredient IDs
+     */
+    function getValidIngredients() external view returns (uint256[] memory) {
+        return ingredient.getValidIngredients();
+    }
+
+    /**
+     * @dev Get ingredient name
+     * @param id Ingredient ID
+     * @return Ingredient name
+     */
+    function getIngredientName(uint256 id) external view returns (string memory) {
+        return ingredient.getIngredientName(id);
     }
 
     /**
@@ -662,6 +788,20 @@ describe("DripDropCafe", function () {
       "CoffeeNFT",
       await dripDropCafe.coffeeNFT()
     );
+
+    // Register ingredients
+    const ingredients = [
+      { id: 0, name: "Coffee Bean" },
+      { id: 1, name: "Water" },
+      { id: 2, name: "Milk" },
+      { id: 3, name: "Sugar" },
+      { id: 4, name: "Cream" },
+      { id: 5, name: "Ice" },
+    ];
+
+    for (const ingredient of ingredients) {
+      await dripDropCafe.registerIngredient(ingredient.id, ingredient.name);
+    }
 
     // Setup test data
     await mockPaymentToken.mint(user.address, ethers.parseEther("1"));
@@ -911,23 +1051,17 @@ describe("DripDropCafe", function () {
       ).to.be.revertedWithCustomError(dripDropCafe, "IncorrectGrid");
     });
 
-    it("Should revert with InvalidIngredientID if ingredient ID > 5", async function () {
-      // Set a recipe with ingredient ID 6 (invalid)
-      const invalidPattern = [0, 0, 0, 0, 6, 0, 0, 0, 0]; // ID 6 is invalid
+    it("Should revert with InvalidIngredientID if ingredient ID not registered", async function () {
+      // Try to set a recipe with unregistered ingredient ID 99
+      const invalidPattern = [0, 0, 0, 0, 99, 0, 0, 0, 0]; // ID 99 is not registered
 
-      // First set the recipe with the invalid pattern
-      await dripDropCafe.setRecipe(
-        HOT_AMERICANO,
-        invalidPattern,
-        "ipfs://americano/"
-      );
-
-      // Set price for the menu
-      await dripDropCafe.setMenuPrice(HOT_AMERICANO, PRICES[HOT_AMERICANO]);
-
-      // Now try to craft with the invalid pattern - should revert with InvalidIngredientID
+      // Should revert when trying to set recipe with invalid ingredient ID
       await expect(
-        dripDropCafe.connect(user).craftCoffee(HOT_AMERICANO, invalidPattern)
+        dripDropCafe.setRecipe(
+          HOT_AMERICANO,
+          invalidPattern,
+          "ipfs://americano/"
+        )
       ).to.be.revertedWithCustomError(dripDropCafe, "InvalidIngredientID");
     });
 
@@ -1126,50 +1260,60 @@ describe("DripDropCafe", function () {
 import { ethers } from "hardhat";
 
 async function main() {
-  const [deployer] = await ethers.getSigners();
+  console.log("🚀 DripDropCafe 배포 시작...");
 
-  console.log("Deploying contracts with the account:", deployer.address);
-  console.log(
-    "Account balance:",
-    (await deployer.provider.getBalance(deployer.address)).toString()
-  );
-
-  // 1. Deploy MockPaymentToken
-  console.log("\n1. Deploying MockPaymentToken...");
+  // 1. MockPaymentToken 배포
+  console.log("\n1. MockPaymentToken 배포 중...");
   const MockPaymentToken = await ethers.getContractFactory("MockPaymentToken");
   const mockPaymentToken = await MockPaymentToken.deploy();
   await mockPaymentToken.waitForDeployment();
-  console.log(
-    "MockPaymentToken deployed to:",
-    await mockPaymentToken.getAddress()
-  );
 
-  // 2. Deploy DripDropCafe (which will deploy IngredientToken and CoffeeNFT)
-  console.log("\n2. Deploying DripDropCafe...");
+  const mockPaymentTokenAddress = await mockPaymentToken.getAddress();
+  console.log(`MockPaymentToken 배포 완료: ${mockPaymentTokenAddress}`);
+
+  // 2. DripDropCafe 배포 (IngredientToken과 CoffeeNFT는 자동 생성)
+  console.log("\n2. DripDropCafe 배포 중...");
   const DripDropCafe = await ethers.getContractFactory("DripDropCafe");
-  const dripDropCafe = await DripDropCafe.deploy(
-    await mockPaymentToken.getAddress()
-  );
+  const dripDropCafe = await DripDropCafe.deploy(mockPaymentTokenAddress);
   await dripDropCafe.waitForDeployment();
-  console.log("DripDropCafe deployed to:", await dripDropCafe.getAddress());
 
-  // Get addresses of child contracts
+  const dripDropCafeAddress = await dripDropCafe.getAddress();
+  console.log(`DripDropCafe 배포 완료: ${dripDropCafeAddress}`);
+
+  // 3. 자식 컨트랙트 주소 가져오기
   const ingredientTokenAddress = await dripDropCafe.ingredient();
   const coffeeNFTAddress = await dripDropCafe.coffeeNFT();
 
-  console.log("IngredientToken deployed to:", ingredientTokenAddress);
-  console.log("CoffeeNFT deployed to:", coffeeNFTAddress);
+  console.log(`IngredientToken 주소: ${ingredientTokenAddress}`);
+  console.log(`CoffeeNFT 주소: ${coffeeNFTAddress}`);
 
-  // 3. Set menu prices
-  console.log("\n3. Setting menu prices...");
+  // 4. 재료 등록
+  console.log("\n3. 재료 등록 중...");
+  
+  const ingredients = [
+    { id: 0, name: "Coffee Bean" },
+    { id: 1, name: "Water" },
+    { id: 2, name: "Milk" },
+    { id: 3, name: "Sugar" },
+    { id: 4, name: "Cream" },
+    { id: 5, name: "Ice" },
+  ];
+
+  for (const ingredient of ingredients) {
+    await dripDropCafe.registerIngredient(ingredient.id, ingredient.name);
+    console.log(`재료 등록: ${ingredient.name} (ID: ${ingredient.id})`);
+  }
+
+  // 5. 메뉴 가격 설정
+  console.log("\n4. 메뉴 가격 설정 중...");
   const menuPrices = [
-    { id: 0, price: ethers.parseEther("0.003"), name: "ESPRESSO" },
-    { id: 1, price: ethers.parseEther("0.004"), name: "HOT_AMERICANO" },
-    { id: 2, price: ethers.parseEther("0.005"), name: "ICE_AMERICANO" },
-    { id: 3, price: ethers.parseEther("0.006"), name: "HOT_LATTE" },
-    { id: 4, price: ethers.parseEther("0.007"), name: "ICE_LATTE" },
-    { id: 5, price: ethers.parseEther("0.008"), name: "HOT_CAPPU" },
-    { id: 6, price: ethers.parseEther("0.009"), name: "ICE_CAPPU" },
+    { id: 0, name: "ESPRESSO", price: ethers.parseEther("0.003") },
+    { id: 1, name: "HOT_AMERICANO", price: ethers.parseEther("0.004") },
+    { id: 2, name: "ICE_AMERICANO", price: ethers.parseEther("0.005") },
+    { id: 3, name: "HOT_LATTE", price: ethers.parseEther("0.006") },
+    { id: 4, name: "ICE_LATTE", price: ethers.parseEther("0.007") },
+    { id: 5, name: "HOT_CAPPU", price: ethers.parseEther("0.008") },
+    { id: 6, name: "ICE_CAPPU", price: ethers.parseEther("0.009") },
   ];
 
   for (const menu of menuPrices) {
@@ -1179,44 +1323,49 @@ async function main() {
     );
   }
 
-  // 4. Setup basic recipes
-  console.log("\n4. Setting up recipes...");
+  // 6. 기본 레시피 설정
+  console.log("\n5. 레시피 설정 중...");
 
-  // ICE_AMERICANO recipe: [0,1,0,1,0,1,0,5,0] (exact pattern)
+  // ICE_AMERICANO 레시피: [0,1,0,1,0,1,0,5,0] (정확한 패턴)
   const iceAmericanoPattern = [0, 1, 0, 1, 0, 1, 0, 5, 0];
   await dripDropCafe.setRecipe(
     2, // ICE_AMERICANO
     iceAmericanoPattern,
     "ipfs://ice_americano/"
   );
-  console.log("ICE_AMERICANO recipe set: [0,1,0,1,0,1,0,5,0]");
+  console.log("ICE_AMERICANO 레시피 설정: [0,1,0,1,0,1,0,5,0]");
 
-  // ESPRESSO recipe: [0,0,0,0,1,0,0,0,0] (exact pattern)
-  const espressoPattern = [0, 0, 0, 0, 1, 0, 0, 0, 0];
+  // ESPRESSO 레시피: [0,0,0,0,0,0,0,0,0] (커피원두만)
+  const espressoPattern = [0, 0, 0, 0, 0, 0, 0, 0, 0];
   await dripDropCafe.setRecipe(
     0, // ESPRESSO
     espressoPattern,
     "ipfs://espresso/"
   );
-  console.log("ESPRESSO recipe set: [0,0,0,0,1,0,0,0,0]");
+  console.log("ESPRESSO 레시피 설정: [0,0,0,0,0,0,0,0,0]");
 
-  // HOT_LATTE recipe: [0,1,0,0,2,0,0,3,0] (exact pattern)
+  // HOT_LATTE 레시피: [0,1,0,0,2,0,0,3,0] (정확한 패턴)
   const hotLattePattern = [0, 1, 0, 0, 2, 0, 0, 3, 0];
   await dripDropCafe.setRecipe(
     3, // HOT_LATTE
     hotLattePattern,
     "ipfs://hot_latte/"
   );
-  console.log("HOT_LATTE recipe set: [0,1,0,0,2,0,0,3,0]");
+  console.log("HOT_LATTE 레시피 설정: [0,1,0,0,2,0,0,3,0]");
 
-  console.log("\n✅ Deployment completed!");
-  console.log("\n📋 Summary:");
-  console.log("MockPaymentToken:", await mockPaymentToken.getAddress());
-  console.log("DripDropCafe:", await dripDropCafe.getAddress());
+  console.log("\n✅ 배포 완료!");
+  console.log("\n📋 요약:");
+  console.log("MockPaymentToken:", mockPaymentTokenAddress);
+  console.log("DripDropCafe:", dripDropCafeAddress);
   console.log("IngredientToken:", ingredientTokenAddress);
   console.log("CoffeeNFT:", coffeeNFTAddress);
 
-  console.log("\n💰 Menu Prices:");
+  console.log("\n🧪 등록된 재료:");
+  for (const ingredient of ingredients) {
+    console.log(`${ingredient.name} (ID: ${ingredient.id})`);
+  }
+
+  console.log("\n💰 메뉴 가격:");
   for (const menu of menuPrices) {
     const price = await dripDropCafe.getMenuPrice(menu.id);
     console.log(
@@ -1243,8 +1392,8 @@ import { ethers } from "hardhat";
 async function main() {
   // Contract addresses from deployment
   const MOCK_PAYMENT_TOKEN_ADDRESS =
-    "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853";
-  const DRIP_DROP_CAFE_ADDRESS = "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6";
+    "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+  const DRIP_DROP_CAFE_ADDRESS = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
 
   const [deployer, user] = await ethers.getSigners();
 
@@ -1318,62 +1467,47 @@ async function main() {
   // 4. Order ICE_AMERICANO multiple times to collect ingredients
   console.log("\n4. Ordering ICE_AMERICANO to collect ingredients...");
   const orderCount = 20;
-  const ingredientCounts = new Array(6).fill(0);
 
   for (let i = 0; i < orderCount; i++) {
-    const tx = await dripDropCafe.connect(user).orderMenu(ICE_AMERICANO);
-    const receipt = await tx.wait();
-
-    // Get ingredient received from event
-    const event = receipt?.logs.find((log) => {
-      try {
-        const parsed = dripDropCafe.interface.parseLog(log);
-        return parsed?.name === "MenuOrdered";
-      } catch {
-        return false;
-      }
-    });
-
-    if (event) {
-      const parsed = dripDropCafe.interface.parseLog(event);
-      const ingredientId = parsed?.args.ingredientId;
-      ingredientCounts[ingredientId]++;
-    }
+    await dripDropCafe.connect(user).orderMenu(ICE_AMERICANO);
   }
 
   console.log("✅ Ordered 20 ICE_AMERICANO items");
   console.log("Ingredients collected:");
-  const ingredientNames = ["Coffee", "Water", "Milk", "Sugar", "Cream", "Ice"];
-  for (let i = 0; i < 6; i++) {
-    const balance = await ingredientToken.balanceOf(user.address, i);
-    console.log(`  ${ingredientNames[i]} (ID: ${i}): ${balance.toString()}`);
+
+  // Get all valid ingredient IDs and their names
+  const validIngredients = await dripDropCafe.getValidIngredients();
+  for (const ingredientId of validIngredients) {
+    const balance = await ingredientToken.balanceOf(user.address, ingredientId);
+    const name = await dripDropCafe.getIngredientName(ingredientId);
+    console.log(`  ${name} (ID: ${ingredientId}): ${balance.toString()}`);
   }
 
   // 5. Check if we have enough ingredients for the recipe
   console.log("\n5. Checking ingredients for ICE_AMERICANO recipe...");
-  const neededIngredients = new Array(6).fill(0);
+  const neededIngredients = new Map<number, number>();
 
   for (let i = 0; i < 9; i++) {
     const ingredientId = Number(patternArray[i]);
     if (ingredientId !== 0) {
       // 0 is EMPTY
-      neededIngredients[ingredientId]++;
+      neededIngredients.set(
+        ingredientId,
+        (neededIngredients.get(ingredientId) || 0) + 1
+      );
     }
   }
 
   console.log("Required ingredients:");
   let canCraft = true;
-  for (let i = 0; i < 6; i++) {
-    if (neededIngredients[i] > 0) {
-      const balance = await ingredientToken.balanceOf(user.address, i);
-      console.log(
-        `  ${ingredientNames[i]} (ID: ${i}): need ${
-          neededIngredients[i]
-        }, have ${balance.toString()}`
-      );
-      if (balance < neededIngredients[i]) {
-        canCraft = false;
-      }
+  for (const [ingredientId, needed] of neededIngredients) {
+    const balance = await ingredientToken.balanceOf(user.address, ingredientId);
+    const name = await dripDropCafe.getIngredientName(ingredientId);
+    console.log(
+      `  ${name} (ID: ${ingredientId}): need ${needed}, have ${balance.toString()}`
+    );
+    if (balance < needed) {
+      canCraft = false;
     }
   }
 

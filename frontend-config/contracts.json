@@ -1,0 +1,114 @@
+{
+  "network": {
+    "name": "World Chain Sepolia Testnet",
+    "chainId": 4801,
+    "rpcUrl": "https://worldchain-sepolia.g.alchemy.com/public"
+  },
+  "contracts": {
+    "DripDropCafe": {
+      "address": "0x2fc1c9B3a3B089Cd4f5FB9E2Ca008Af8FF8C8C31",
+      "description": "Main contract - handles all business logic",
+      "requiredFunctions": [
+        "orderMenu(uint256)",
+        "craftCoffee(uint256,uint8[9])",
+        "redeemCoffee(uint256)",
+        "getMenuPrice(uint256)",
+        "getValidIngredients()",
+        "getIngredientName(uint256)",
+        "validatePattern(uint256,uint8[9])",
+        "findMatchingRecipe(uint8[9])",
+        "hasRequiredIngredients(address,uint8[9])",
+        "getMenusWithRecipes()",
+        "getRecipePattern(uint256)"
+      ]
+    },
+    "MockPaymentToken": {
+      "address": "0x0e1E1787d384992064958B49f8D20f305D12D7a1",
+      "description": "USDC token - for payments and approvals",
+      "requiredFunctions": [
+        "approve(address,uint256)",
+        "allowance(address,address)",
+        "balanceOf(address)",
+        "transfer(address,uint256)",
+        "name()",
+        "symbol()",
+        "decimals()"
+      ]
+    },
+    "IngredientToken": {
+      "address": "0x620545FDad6Bc3091A8f5ee32824d25DC31BC9fa",
+      "description": "ERC1155 ingredients - for balance checking",
+      "requiredFunctions": [
+        "balanceOf(address,uint256)",
+        "balanceOfBatch(address[],uint256[])",
+        "isApprovedForAll(address,address)",
+        "setApprovalForAll(address,bool)"
+      ]
+    },
+    "CoffeeNFT": {
+      "address": "0x6570D3EB9CC5740dcE8918C69Ffe7E6C69501206",
+      "description": "ERC721 coffee NFTs - for ownership and metadata",
+      "requiredFunctions": [
+        "ownerOf(uint256)",
+        "balanceOf(address)",
+        "tokenURI(uint256)",
+        "getTokenMenu(uint256)",
+        "isApprovedForAll(address,address)",
+        "setApprovalForAll(address,bool)",
+        "approve(address,uint256)",
+        "getApproved(uint256)"
+      ]
+    }
+  },
+  "usage": {
+    "centralizedFunctions": {
+      "description": "Most business logic goes through DripDropCafe",
+      "examples": [
+        "Order menu: Call DripDropCafe.orderMenu()",
+        "Craft coffee: Call DripDropCafe.craftCoffee()",
+        "Redeem coffee: Call DripDropCafe.redeemCoffee()",
+        "Get ingredient info: Call DripDropCafe.getIngredientName()"
+      ]
+    },
+    "directCalls": {
+      "description": "Some functions need direct calls to individual contracts",
+      "examples": [
+        "Check USDC balance: Call MockPaymentToken.balanceOf()",
+        "Approve USDC spending: Call MockPaymentToken.approve(DripDropCafe, amount)",
+        "Check ingredient balance: Call IngredientToken.balanceOf(user, ingredientId)",
+        "Check NFT ownership: Call CoffeeNFT.ownerOf(tokenId)",
+        "Get NFT metadata: Call CoffeeNFT.tokenURI(tokenId)"
+      ]
+    }
+  },
+  "workflow": {
+    "1_orderMenu": {
+      "description": "User orders a menu item",
+      "steps": [
+        "1. Check USDC balance: MockPaymentToken.balanceOf(userAddress)",
+        "2. Check current allowance: MockPaymentToken.allowance(userAddress, DripDropCafeAddress)",
+        "3. Approve USDC if needed: MockPaymentToken.approve(DripDropCafeAddress, amount)",
+        "4. Order menu: DripDropCafe.orderMenu(menuId)",
+        "5. Check received ingredient: IngredientToken.balanceOf(userAddress, ingredientId)"
+      ]
+    },
+    "2_craftCoffee": {
+      "description": "User crafts coffee using ingredients",
+      "steps": [
+        "1. Get user's ingredients: IngredientToken.balanceOfBatch(userAddress, ingredientIds)",
+        "2. Validate pattern: DripDropCafe.validatePattern(menuId, pattern)",
+        "3. Check if user has required ingredients: DripDropCafe.hasRequiredIngredients(userAddress, pattern)",
+        "4. Set approval for ingredients: IngredientToken.setApprovalForAll(DripDropCafeAddress, true)",
+        "5. Craft coffee: DripDropCafe.craftCoffee(menuId, pattern)",
+        "6. Check received NFT: CoffeeNFT.balanceOf(userAddress)"
+      ]
+    },
+    "3_redeemCoffee": {
+      "description": "User redeems coffee NFT",
+      "steps": [
+        "1. Check NFT ownership: CoffeeNFT.ownerOf(tokenId)",
+        "2. Redeem coffee: DripDropCafe.redeemCoffee(tokenId)"
+      ]
+    }
+  }
+}

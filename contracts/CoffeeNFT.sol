@@ -57,10 +57,7 @@ contract CoffeeNFT is ERC721, ERC721URIStorage, Ownable {
      * @dev Burn coffee NFT
      * @param tokenId Token ID to burn
      */
-    function burn(uint256 tokenId) external {
-        if (!_isAuthorized(ownerOf(tokenId), msg.sender, tokenId) && msg.sender != owner()) {
-            revert NotAuthorized();
-        }
+    function burn(uint256 tokenId) external onlyOwner {
         _burn(tokenId);
     }
 

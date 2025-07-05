@@ -3,13 +3,14 @@ pragma solidity ^0.8.28;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title CoffeeNFT
  * @dev ERC721 NFT for coffee tokens
  */
-contract CoffeeNFT is ERC721, ERC721URIStorage, Ownable {
+contract CoffeeNFT is ERC721, ERC721URIStorage, ERC721Enumerable, Ownable {
     uint256 private _nextTokenId;
     
     // Base URI for each menu ID
@@ -80,13 +81,68 @@ contract CoffeeNFT is ERC721, ERC721URIStorage, Ownable {
         return tokenMenus[tokenId];
     }
 
+    /**
+     * @dev Get count of NFTs owned by user for specific menu
+     * @param user User address
+     * @param menuId Menu ID
+     * @return count Number of NFTs owned by user for the menu
+     */
+    function getUserMenuNFTCount(address user, uint256 menuId) external view returns (uint256) {
+        uint256 count = 0;
+        uint256 balance = balanceOf(user);
+        
+        for (uint256 i = 0; i < balance; i++) {
+            uint256 tokenId = tokenOfOwnerByIndex(user, i);
+            if (tokenMenus[tokenId] == menuId) {
+                count++;
+            }
+        }
+        
+        return count;
+    }
+
+    /**
+     * @dev Get all NFT token IDs owned by user for specific menu
+     * @param user User address
+     * @param menuId Menu ID
+     * @return tokenIds Array of token IDs owned by user for the menu
+     */
+    function getUserMenuNFTs(address user, uint256 menuId) external view returns (uint256[] memory) {
+        uint256 balance = balanceOf(user);
+        uint256[] memory temp = new uint256[](balance);
+        uint256 count = 0;
+        
+        for (uint256 i = 0; i < balance; i++) {
+            uint256 tokenId = tokenOfOwnerByIndex(user, i);
+            if (tokenMenus[tokenId] == menuId) {
+                temp[count] = tokenId;
+                count++;
+            }
+        }
+        
+        uint256[] memory result = new uint256[](count);
+        for (uint256 i = 0; i < count; i++) {
+            result[i] = temp[i];
+        }
+        
+        return result;
+    }
+
     // Required overrides
     function tokenURI(uint256 tokenId) public view override(ERC721, ERC721URIStorage) returns (string memory) {
         return super.tokenURI(tokenId);
     }
 
-    function supportsInterface(bytes4 interfaceId) public view override(ERC721, ERC721URIStorage) returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public view override(ERC721, ERC721URIStorage, ERC721Enumerable) returns (bool) {
         return super.supportsInterface(interfaceId);
+    }
+
+    function _increaseBalance(address account, uint128 value) internal override(ERC721, ERC721Enumerable) {
+        super._increaseBalance(account, value);
+    }
+
+    function _update(address to, uint256 tokenId, address auth) internal override(ERC721, ERC721Enumerable) returns (address) {
+        return super._update(to, tokenId, auth);
     }
 
     // Helper function to convert uint to string

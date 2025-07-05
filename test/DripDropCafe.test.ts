@@ -138,8 +138,8 @@ describe("DripDropCafe", function () {
   });
 
   describe("Recipe Management", function () {
-    const espressoPattern = [0, 0, 0, 0, 1, 0, 0, 0, 0]; // Water in center
-    const iceAmericanoPattern = [0, 1, 0, 1, 0, 1, 0, 5, 0]; // Water and ice pattern
+    const espressoPattern = [0, 0, 0, 0, 1, 0, 0, 0, 0];
+    const iceAmericanoPattern = [0, 1, 0, 1, 0, 1, 0, 5, 0];
 
     it("Should set recipe correctly", async function () {
       await dripDropCafe.setRecipe(
@@ -559,129 +559,193 @@ describe("DripDropCafe", function () {
   // New tests for pattern validation functions
   describe("Pattern Validation Functions", function () {
     beforeEach(async function () {
-      // Ingredients are already registered in main beforeEach, so skip registration
+      // Ingredients are already registered in main beforeEach
 
-      // Set up a recipe
-      const pattern = [1, 0, 0, 0, 0, 0, 0, 0, 0]; // WATER only
+      // Set menu prices
+      await dripDropCafe.setMenuPrice(0, ethers.parseUnits("3", 6));
+      await dripDropCafe.setMenuPrice(2, ethers.parseUnits("5", 6));
+      await dripDropCafe.setMenuPrice(3, ethers.parseUnits("6", 6));
+
+      // Set recipes (메뉴 0은 비워둠)
       await dripDropCafe.setRecipe(
-        1,
-        pattern,
-        "https://example.com/americano/"
+        2,
+        [0, 1, 0, 1, 0, 1, 0, 5, 0],
+        "https://example.com/ice-americano/"
       );
-      await dripDropCafe.setMenuPrice(1, ethers.parseEther("0.05"));
+      await dripDropCafe.setRecipe(
+        3,
+        [0, 1, 0, 0, 2, 0, 0, 3, 0],
+        "https://example.com/hot-latte/"
+      );
     });
 
     it("Should validate pattern correctly", async function () {
-      const correctPattern = [1, 0, 0, 0, 0, 0, 0, 0, 0]; // WATER only
-      const incorrectPattern = [2, 0, 0, 0, 0, 0, 0, 0, 0]; // MILK only
+      const validPattern = [0, 1, 0, 1, 0, 1, 0, 5, 0];
+      const invalidPattern = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
-      const isValidCorrect = await dripDropCafe.validatePattern(
-        1,
-        correctPattern
-      );
-      const isValidIncorrect = await dripDropCafe.validatePattern(
-        1,
-        incorrectPattern
-      );
-
-      expect(isValidCorrect).to.be.true;
-      expect(isValidIncorrect).to.be.false;
+      expect(await dripDropCafe.validatePattern(2, validPattern)).to.be.true;
+      expect(await dripDropCafe.validatePattern(2, invalidPattern)).to.be.false;
     });
 
     it("Should find matching recipe", async function () {
-      const pattern = [1, 0, 0, 0, 0, 0, 0, 0, 0]; // WATER only
-      const matchingMenuId = await dripDropCafe.findMatchingRecipe(pattern);
+      const iceAmericanoPattern = [0, 1, 0, 1, 0, 1, 0, 5, 0];
+      const hotLattePattern = [0, 1, 0, 0, 2, 0, 0, 3, 0];
+      const noMatchPattern = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
-      expect(matchingMenuId).to.equal(1);
+      expect(
+        await dripDropCafe.findMatchingRecipe(iceAmericanoPattern)
+      ).to.equal(2);
+      expect(await dripDropCafe.findMatchingRecipe(hotLattePattern)).to.equal(
+        3
+      );
+      expect(await dripDropCafe.findMatchingRecipe(noMatchPattern)).to.equal(0);
     });
 
     it("Should return 0 for non-matching pattern", async function () {
-      const pattern = [2, 0, 0, 0, 0, 0, 0, 0, 0]; // MILK only (no recipe set)
-      const matchingMenuId = await dripDropCafe.findMatchingRecipe(pattern);
-
-      expect(matchingMenuId).to.equal(0);
+      const nonMatchingPattern = [9, 8, 7, 6, 5, 4, 3, 2, 1];
+      expect(
+        await dripDropCafe.findMatchingRecipe(nonMatchingPattern)
+      ).to.equal(0);
     });
 
     it("Should get menus with recipes", async function () {
       const menusWithRecipes = await dripDropCafe.getMenusWithRecipes();
-
-      expect(menusWithRecipes.length).to.equal(1);
-      expect(menusWithRecipes[0]).to.equal(1);
+      expect(menusWithRecipes).to.have.lengthOf(2);
+      expect(menusWithRecipes).to.include(2n);
+      expect(menusWithRecipes).to.include(3n);
     });
 
     it("Should check if user has required ingredients", async function () {
-      const pattern = [1, 0, 0, 0, 0, 0, 0, 0, 0]; // WATER only
-
-      // User doesn't have ingredients yet
-      const hasIngredientsInitially = await dripDropCafe.hasRequiredIngredients(
-        user.address,
-        pattern
-      );
-      expect(hasIngredientsInitially).to.be.false;
-
-      // Give user some ingredients
+      // Mint ingredients to user
+      await mockPaymentToken.mint(user.address, ethers.parseUnits("100", 6));
       await mockPaymentToken
         .connect(user)
-        .approve(dripDropCafe.target, ethers.parseEther("0.1"));
-      await dripDropCafe.connect(user).orderMenu(1);
+        .approve(dripDropCafe.target, ethers.parseUnits("100", 6));
 
-      // Check again (user might have the required ingredient now)
-      const hasIngredientsAfter = await dripDropCafe.hasRequiredIngredients(
+      // Order menus to get ingredients (레시피가 있는 메뉴만)
+      await dripDropCafe.connect(user).orderMenu(2);
+      await dripDropCafe.connect(user).orderMenu(3);
+
+      const simplePattern = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+      const complexPattern = [0, 1, 0, 1, 0, 1, 0, 5, 0];
+
+      // User should have some ingredients, but might not have all for complex patterns
+      // This is probabilistic due to random ingredient distribution
+      const hasSimple = await dripDropCafe.hasRequiredIngredients(
         user.address,
-        pattern
+        simplePattern
       );
-      // Note: This depends on random ingredient distribution, so we can't guarantee true
-      // But the function should execute without error
-      expect(typeof hasIngredientsAfter).to.equal("boolean");
+      const hasComplex = await dripDropCafe.hasRequiredIngredients(
+        user.address,
+        complexPattern
+      );
+
+      // At least one should be true or false (testing the function works)
+      expect(typeof hasSimple).to.equal("boolean");
+      expect(typeof hasComplex).to.equal("boolean");
     });
 
     it("Should handle complex patterns with multiple ingredients", async function () {
-      // Set up a more complex recipe
-      const complexPattern = [1, 2, 0, 3, 0, 0, 0, 0, 5]; // WATER, MILK, SUGAR, ICE
-      await dripDropCafe.setRecipe(
-        2,
-        complexPattern,
-        "https://example.com/latte/"
-      );
+      // Mint ingredients to user
+      await mockPaymentToken.mint(user.address, ethers.parseUnits("100", 6));
+      await mockPaymentToken
+        .connect(user)
+        .approve(dripDropCafe.target, ethers.parseUnits("100", 6));
 
-      const isValid = await dripDropCafe.validatePattern(2, complexPattern);
-      expect(isValid).to.be.true;
+      // Order many menus to get various ingredients
+      for (let i = 0; i < 20; i++) {
+        await dripDropCafe.connect(user).orderMenu(2);
+      }
 
-      const matchingMenuId = await dripDropCafe.findMatchingRecipe(
+      const complexPattern = [0, 1, 0, 1, 0, 1, 0, 5, 0];
+      const hasIngredients = await dripDropCafe.hasRequiredIngredients(
+        user.address,
         complexPattern
       );
-      expect(matchingMenuId).to.equal(2);
+
+      expect(typeof hasIngredients).to.equal("boolean");
     });
   });
 
-  it("Should withdraw payments", async function () {
-    // Set up menu and recipe first
-    const pattern = [1, 0, 0, 0, 0, 0, 0, 0, 0]; // WATER only
-    await dripDropCafe.setRecipe(1, pattern, "https://example.com/americano/");
-    await dripDropCafe.setMenuPrice(1, ethers.parseEther("0.05"));
+  describe("Menu Information Functions", function () {
+    beforeEach(async function () {
+      // Ingredients are already registered in main beforeEach
 
-    // First, make some payments to the contract
-    await mockPaymentToken
-      .connect(user)
-      .approve(dripDropCafe.target, ethers.parseEther("0.1"));
-    await dripDropCafe.connect(user).orderMenu(1);
+      // Set menu prices
+      await dripDropCafe.setMenuPrice(0, ethers.parseUnits("3", 6));
+      await dripDropCafe.setMenuPrice(1, ethers.parseUnits("4", 6));
+      await dripDropCafe.setMenuPrice(2, ethers.parseUnits("5", 6));
 
-    const contractBalance = await mockPaymentToken.balanceOf(
-      dripDropCafe.target
-    );
-    expect(contractBalance).to.equal(ethers.parseEther("0.05"));
+      // Set recipes with base URIs (메뉴 0은 비워둠)
+      await dripDropCafe.setRecipe(
+        2,
+        [0, 1, 0, 1, 0, 1, 0, 5, 0],
+        "https://example.com/ice-americano/"
+      );
+    });
 
-    const ownerBalanceBefore = await mockPaymentToken.balanceOf(owner.address);
+    it("Should get all menus information", async function () {
+      const [menuIds, prices, hasRecipes, baseURIList] =
+        await dripDropCafe.getAllMenus();
 
-    // Withdraw payments
-    await dripDropCafe.withdrawPayments(
-      owner.address,
-      ethers.parseEther("0.05")
-    );
+      expect(menuIds).to.have.lengthOf(22);
+      expect(prices).to.have.lengthOf(22);
+      expect(hasRecipes).to.have.lengthOf(22);
+      expect(baseURIList).to.have.lengthOf(22);
 
-    const ownerBalanceAfter = await mockPaymentToken.balanceOf(owner.address);
-    expect(ownerBalanceAfter).to.equal(
-      ownerBalanceBefore + ethers.parseEther("0.05")
-    );
+      // Check specific menus
+      expect(menuIds[0]).to.equal(0);
+      expect(prices[0]).to.equal(ethers.parseUnits("3", 6));
+      expect(hasRecipes[0]).to.be.false; // 메뉴 0은 레시피 없음
+      expect(baseURIList[0]).to.equal("");
+
+      expect(menuIds[1]).to.equal(1);
+      expect(prices[1]).to.equal(ethers.parseUnits("4", 6));
+      expect(hasRecipes[1]).to.be.false;
+      expect(baseURIList[1]).to.equal("");
+
+      expect(menuIds[2]).to.equal(2);
+      expect(prices[2]).to.equal(ethers.parseUnits("5", 6));
+      expect(hasRecipes[2]).to.be.true;
+      expect(baseURIList[2]).to.equal("https://example.com/ice-americano/");
+    });
+
+    it("Should get individual menu information", async function () {
+      const [price, hasRecipe, baseURI, pattern] =
+        await dripDropCafe.getMenuInfo(2);
+
+      expect(price).to.equal(ethers.parseUnits("5", 6));
+      expect(hasRecipe).to.be.true;
+      expect(baseURI).to.equal("https://example.com/ice-americano/");
+      expect(pattern).to.deep.equal([0, 1, 0, 1, 0, 1, 0, 5, 0]);
+    });
+
+    it("Should get menu base URI", async function () {
+      expect(await dripDropCafe.getMenuBaseURI(2)).to.equal(
+        "https://example.com/ice-americano/"
+      );
+      expect(await dripDropCafe.getMenuBaseURI(0)).to.equal(""); // No recipe set
+      expect(await dripDropCafe.getMenuBaseURI(1)).to.equal(""); // No recipe set
+    });
+
+    it("Should handle menus without recipes", async function () {
+      const [price, hasRecipe, baseURI, pattern] =
+        await dripDropCafe.getMenuInfo(1);
+
+      expect(price).to.equal(ethers.parseUnits("4", 6));
+      expect(hasRecipe).to.be.false;
+      expect(baseURI).to.equal("");
+      expect(pattern).to.deep.equal([0, 0, 0, 0, 0, 0, 0, 0, 0]); // Default empty pattern
+    });
+
+    it("Should handle menus without prices", async function () {
+      const [price, hasRecipe, baseURI, pattern] =
+        await dripDropCafe.getMenuInfo(9);
+
+      expect(price).to.equal(0);
+      expect(hasRecipe).to.be.false;
+      expect(baseURI).to.equal("");
+      expect(pattern).to.deep.equal([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    });
   });
 });

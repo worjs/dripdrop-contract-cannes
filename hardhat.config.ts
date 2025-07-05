@@ -5,7 +5,15 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const config: HardhatUserConfig = {
-  solidity: "0.8.28",
+  solidity: {
+    version: "0.8.28",
+    settings: {
+      optimizer: {
+        enabled: true,
+        runs: 200,
+      },
+    },
+  },
   networks: {
     // World Chain Sepolia Testnet
     "worldchain-sepolia": {
@@ -16,6 +24,7 @@ const config: HardhatUserConfig = {
     // Hardhat local network
     hardhat: {
       chainId: 31337,
+      allowUnlimitedContractSize: true,
     },
   },
   etherscan: {

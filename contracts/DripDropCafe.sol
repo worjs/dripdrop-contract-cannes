@@ -287,6 +287,63 @@ contract DripDropCafe is Ownable, ReentrancyGuard {
     }
 
     /**
+     * @dev Get all available menus with their information
+     * @return menuIds Array of menu IDs
+     * @return prices Array of menu prices (0 if not set)
+     * @return hasRecipes Array of booleans indicating if menu has recipe
+     * @return baseURIList Array of base URIs for NFT metadata
+     */
+    function getAllMenus() external view returns (
+        uint256[] memory menuIds,
+        uint256[] memory prices,
+        bool[] memory hasRecipes,
+        string[] memory baseURIList
+    ) {
+        uint256 maxMenuId = 22; // Max 22 menus (0-21)
+        
+        menuIds = new uint256[](maxMenuId);
+        prices = new uint256[](maxMenuId);
+        hasRecipes = new bool[](maxMenuId);
+        baseURIList = new string[](maxMenuId);
+        
+        for (uint256 i = 0; i < maxMenuId; i++) {
+            menuIds[i] = i;
+            prices[i] = menuPrices[i];
+            hasRecipes[i] = recipes[i].hash != 0;
+            baseURIList[i] = baseURIs[i];
+        }
+    }
+
+    /**
+     * @dev Get menu information by ID
+     * @param menuId Menu ID
+     * @return price Menu price (0 if not set)
+     * @return hasRecipe True if menu has recipe
+     * @return baseURI Base URI for NFT metadata
+     * @return pattern Recipe pattern (empty array if no recipe)
+     */
+    function getMenuInfo(uint256 menuId) external view returns (
+        uint256 price,
+        bool hasRecipe,
+        string memory baseURI,
+        uint8[9] memory pattern
+    ) {
+        price = menuPrices[menuId];
+        hasRecipe = recipes[menuId].hash != 0;
+        baseURI = baseURIs[menuId];
+        pattern = recipes[menuId].pattern;
+    }
+
+    /**
+     * @dev Get base URI for menu NFT
+     * @param menuId Menu ID
+     * @return Base URI string
+     */
+    function getMenuBaseURI(uint256 menuId) external view returns (string memory) {
+        return baseURIs[menuId];
+    }
+
+    /**
      * @dev Check if user has sufficient ingredients for a pattern
      * @param user User address
      * @param pattern 3x3 pattern array
@@ -347,7 +404,7 @@ contract DripDropCafe is Ownable, ReentrancyGuard {
      * @param menuId Menu ID
      * @return Random ingredient ID
      */
-    function _randomIngredient(uint256 menuId) internal view returns (uint8) {
+    function _randomIngredient(uint256 menuId) private view returns (uint8) {
         uint8[9] memory p = recipes[menuId].pattern;
         uint8[9] memory pool;
         uint256 poolLen;
@@ -368,5 +425,45 @@ contract DripDropCafe is Ownable, ReentrancyGuard {
         ) % poolLen;
         
         return pool[r];
+    }
+
+    /**
+     * @dev Mint ingredients for development/testing (onlyOwner)
+     * @param to Address to mint to
+     * @param ingredientId Ingredient ID
+     * @param amount Amount to mint
+     */
+    function mintIngredientForDev(address to, uint256 ingredientId, uint256 amount) external onlyOwner {
+        ingredient.mint(to, ingredientId, amount, "");
+    }
+
+    /**
+     * @dev Batch mint ingredients for development/testing (onlyOwner)
+     * @param to Address to mint to
+     * @param ingredientIds Array of ingredient IDs
+     * @param amounts Array of amounts to mint
+     */
+    function mintIngredientsForDev(address to, uint256[] memory ingredientIds, uint256[] memory amounts) external onlyOwner {
+        ingredient.mintBatch(to, ingredientIds, amounts, "");
+    }
+
+    /**
+     * @dev Get count of NFTs owned by user for specific menu (wrapper function)
+     * @param user User address
+     * @param menuId Menu ID
+     * @return count Number of NFTs owned by user for the menu
+     */
+    function getUserMenuNFTCount(address user, uint256 menuId) external view returns (uint256) {
+        return coffeeNFT.getUserMenuNFTCount(user, menuId);
+    }
+
+    /**
+     * @dev Get all NFT token IDs owned by user for specific menu (wrapper function)
+     * @param user User address
+     * @param menuId Menu ID
+     * @return tokenIds Array of token IDs owned by user for the menu
+     */
+    function getUserMenuNFTs(address user, uint256 menuId) external view returns (uint256[] memory) {
+        return coffeeNFT.getUserMenuNFTs(user, menuId);
     }
 } 
